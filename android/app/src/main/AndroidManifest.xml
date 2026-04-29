@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Camera permission required by the camera plugin -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Internet permission required for uploading to Colombo -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <application
         android:label="manzoni"
         android:name="${applicationName}"
