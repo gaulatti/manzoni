@@ -33,9 +33,11 @@ class SettingsStore {
     required String username,
     required String password,
   }) async {
-    await saveBaseUrl(baseUrl);
-    await saveUsername(username);
-    await savePassword(password);
+    await Future.wait([
+      saveBaseUrl(baseUrl),
+      saveUsername(username),
+      savePassword(password),
+    ]);
   }
 
   /// Loads all settings at once. Returns a map with nullable values.

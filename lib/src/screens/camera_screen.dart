@@ -58,7 +58,7 @@ class _CameraScreenState extends State<CameraScreen>
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
 
-    if (state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused) {
       controller.dispose();
     } else if (state == AppLifecycleState.resumed) {
       _initCamera(widget.cameras[_cameraIndex]);
