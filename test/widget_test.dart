@@ -1,30 +1,33 @@
-// This is a basic Flutter widget test.
+// Smoke test: verify the home screen renders without crashing.
 //
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+// Full widget tests for camera preview would require mocked platform plugins
+// and are kept in the unit test files instead.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
 
 import 'package:manzoni/main.dart';
+import 'package:manzoni/src/services/settings_store.dart';
+
+class _MockSecureStorage extends Mock implements FlutterSecureStorage {}
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('HomeScreen renders title and open camera button',
+      (WidgetTester tester) async {
+    final store = SettingsStore(storage: _MockSecureStorage());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: HomeScreen(
+          cameras: const [],
+          store: store,
+        ),
+      ),
+    );
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.text('Manzoni'), findsOneWidget);
+    expect(find.text('Open Camera'), findsOneWidget);
   });
 }
