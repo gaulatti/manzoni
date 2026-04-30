@@ -1,6 +1,8 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'review_upload_screen.dart';
+import 'settings_screen.dart';
 import '../debug_log.dart';
 import '../services/settings_store.dart';
 import '../theme/manzoni_theme.dart';
@@ -35,9 +37,15 @@ class _CameraScreenState extends State<CameraScreen>
   bool _appActive = true;
   String? _error;
 
+  double _minZoom = 1.0;
+  double _maxZoom = 1.0;
+  double _currentZoom = 1.0;
+  double _baseZoom = 1.0;
+
   @override
   void initState() {
     super.initState();
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     logDebug('CameraScreen: initState with ${widget.cameras.length} camera(s)');
     WidgetsBinding.instance.addObserver(this);
     _cameraRequested = !widget.embedded;
@@ -92,6 +100,11 @@ class _CameraScreenState extends State<CameraScreen>
         );
         return;
       }
+      
+      _minZoom = await controller.getMinZoomLevel();
+      _maxZoom = await controller.getMaxZoomLevel();
+      _currentZoom = _minZoom;
+      _baseZoom = _currentZoom;
     } catch (e) {
       logDebug('CameraScreen.initCamera[$session]: caught $e');
       await traceDebug(
@@ -161,6 +174,10 @@ class _CameraScreenState extends State<CameraScreen>
       );
       if (!mounted) return;
       logDebug('CameraScreen.capture: pushing review for ${file.path}');
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -168,6 +185,9 @@ class _CameraScreenState extends State<CameraScreen>
               ReviewUploadScreen(imagePath: file.path, store: widget.store),
         ),
       );
+      if (mounted) {
+        SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+      }
       logDebug('CameraScreen.capture: review returned');
     } catch (e) {
       if (mounted) {
@@ -202,6 +222,10 @@ class _CameraScreenState extends State<CameraScreen>
     WidgetsBinding.instance.removeObserver(this);
     _cameraSession++;
     _disposeController();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
     super.dispose();
   }
 
@@ -253,22 +277,55 @@ class _CameraScreenState extends State<CameraScreen>
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('Capture'),
-        actions: [
-          if (widget.cameras.length > 1)
-            IconButton(
-              icon: const Icon(Icons.flip_camera_ios),
-              onPressed: _switchCamera,
-              tooltip: 'Switch camera',
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildBody(),
+          SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.settings, color: Colors.white),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SettingsScreen(store: widget.store),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 32.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const SizedBox(width: 48), // Spacer to balance the row
+                      _buildCaptureButton(),
+                      if (widget.cameras.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 36),
+                          onPressed: _switchCamera,
+                          tooltip: 'Switch camera',
+                        )
+                      else
+                        const SizedBox(width: 48), // Spacer to balance if no switch button
+                    ],
+                  ),
+                ),
+              ],
             ),
+          ),
         ],
       ),
-      body: _buildBody(),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: _buildCaptureButton(),
     );
   }
 
@@ -406,18 +463,76 @@ class _CameraScreenState extends State<CameraScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    return Center(child: CameraPreview(controller));
+    return Center(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              GestureDetector(
+                onScaleStart: (details) {
+                  _baseZoom = _currentZoom;
+                },
+                onScaleUpdate: (details) {
+                  if (_minZoom == _maxZoom) return;
+                  final newZoom =
+                      (_baseZoom * details.scale).clamp(_minZoom, _maxZoom);
+                  if (newZoom != _currentZoom) {
+                    setState(() => _currentZoom = newZoom);
+                    controller.setZoomLevel(newZoom);
+                  }
+                },
+                onTapDown: (details) {
+                  final double x = details.localPosition.dx / constraints.maxWidth;
+                  final double y = details.localPosition.dy / constraints.maxHeight;
+                  controller.setFocusPoint(Offset(x, y));
+                  // Optionally, we could show a focus indicator here
+                },
+                child: CameraPreview(controller),
+              ),
+              if (_maxZoom > _minZoom)
+                Positioned(
+                  right: 16,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: RotatedBox(
+                      quarterTurns: 3,
+                      child: SizedBox(
+                        width: 200,
+                        child: Slider(
+                          value: _currentZoom,
+                          min: _minZoom,
+                          max: _maxZoom,
+                          activeColor: Colors.white,
+                          inactiveColor: Colors.white30,
+                          onChanged: (value) {
+                            setState(() => _currentZoom = value);
+                            controller.setZoomLevel(value);
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildCaptureButton() {
     final controller = _controller;
     return FloatingActionButton.large(
       onPressed: _canCapture(controller) ? _capture : null,
-      backgroundColor: ManzoniColors.sea,
-      foregroundColor: Colors.white,
+      backgroundColor: Colors.white,
+      foregroundColor: Colors.black,
+      elevation: 0,
+      shape: const CircleBorder(),
       child: _capturing
-          ? const CircularProgressIndicator(color: Colors.white)
-          : const Icon(Icons.camera_alt, size: 34),
+          ? const CircularProgressIndicator(color: Colors.black)
+          : const SizedBox(),
     );
   }
 
