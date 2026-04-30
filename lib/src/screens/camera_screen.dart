@@ -10,12 +10,7 @@ import '../theme/manzoni_theme.dart';
 /// Screen that shows a live camera preview and allows the user to capture
 /// a still image, then forwards to [ReviewUploadScreen].
 class CameraScreen extends StatefulWidget {
-  const CameraScreen({
-    super.key,
-    required this.cameras,
-    required this.store,
-    this.embedded = false,
-  });
+  const CameraScreen({super.key, required this.cameras, required this.store, this.embedded = false});
 
   final List<CameraDescription> cameras;
   final SettingsStore store;
@@ -25,8 +20,7 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen>
-    with WidgetsBindingObserver {
+class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver {
   CameraController? _controller;
   int _cameraIndex = 0;
   int _cameraSession = 0;
@@ -66,51 +60,33 @@ class _CameraScreenState extends State<CameraScreen>
       _initializing = true;
       _error = null;
     });
-    logDebug(
-      'CameraScreen.initCamera[$session]: ${desc.name} ${desc.lensDirection}',
-    );
+    logDebug('CameraScreen.initCamera[$session]: ${desc.name} ${desc.lensDirection}');
 
     final previous = _controller;
     _controller = null;
     if (previous != null) {
-      await traceDebug(
-        'CameraScreen.initCamera[$session].disposePrevious',
-        previous.dispose,
-      );
+      await traceDebug('CameraScreen.initCamera[$session].disposePrevious', previous.dispose);
     }
 
-    final controller = CameraController(
-      desc,
-      ResolutionPreset.high,
-      enableAudio: false,
-    );
+    final controller = CameraController(desc, ResolutionPreset.high, enableAudio: false);
     _controller = controller;
 
     try {
-      await traceDebug(
-        'CameraScreen.initCamera[$session].initialize',
-        () => controller.initialize().timeout(const Duration(seconds: 10)),
-      );
+      await traceDebug('CameraScreen.initCamera[$session].initialize', () => controller.initialize().timeout(const Duration(seconds: 10)));
 
       if (!mounted || session != _cameraSession) {
         logDebug('CameraScreen.initCamera[$session]: stale after initialize');
-        await traceDebug(
-          'CameraScreen.initCamera[$session].disposeStale',
-          controller.dispose,
-        );
+        await traceDebug('CameraScreen.initCamera[$session].disposeStale', controller.dispose);
         return;
       }
-      
+
       _minZoom = await controller.getMinZoomLevel();
       _maxZoom = await controller.getMaxZoomLevel();
       _currentZoom = _minZoom;
       _baseZoom = _currentZoom;
     } catch (e) {
       logDebug('CameraScreen.initCamera[$session]: caught $e');
-      await traceDebug(
-        'CameraScreen.initCamera[$session].disposeAfterError',
-        controller.dispose,
-      );
+      await traceDebug('CameraScreen.initCamera[$session].disposeAfterError', controller.dispose);
       if (_controller == controller) {
         _controller = null;
       }
@@ -147,13 +123,10 @@ class _CameraScreenState extends State<CameraScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     logDebug('CameraScreen.lifecycle: $state');
     _appActive = state == AppLifecycleState.resumed;
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _cameraSession++;
       _disposeController();
-    } else if (state == AppLifecycleState.resumed &&
-        _cameraRequested &&
-        widget.cameras.isNotEmpty) {
+    } else if (state == AppLifecycleState.resumed && _cameraRequested && widget.cameras.isNotEmpty) {
       _initCamera(widget.cameras[_cameraIndex]);
     }
   }
@@ -168,21 +141,14 @@ class _CameraScreenState extends State<CameraScreen>
     final activeController = controller!;
     setState(() => _capturing = true);
     try {
-      final file = await traceDebug(
-        'CameraScreen.capture.takePicture',
-        activeController.takePicture,
-      );
+      final file = await traceDebug('CameraScreen.capture.takePicture', activeController.takePicture);
       if (!mounted) return;
       logDebug('CameraScreen.capture: pushing review for ${file.path}');
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ]);
+      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              ReviewUploadScreen(imagePath: file.path, store: widget.store),
+          builder: (_) => ReviewUploadScreen(imagePath: file.path, store: widget.store),
         ),
       );
       if (mounted) {
@@ -192,9 +158,7 @@ class _CameraScreenState extends State<CameraScreen>
     } catch (e) {
       if (mounted) {
         logDebug('CameraScreen.capture: showing failure: $e');
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Capture failed: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Capture failed: $e')));
       }
     } finally {
       if (mounted) {
@@ -222,10 +186,7 @@ class _CameraScreenState extends State<CameraScreen>
     WidgetsBinding.instance.removeObserver(this);
     _cameraSession++;
     _disposeController();
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
     super.dispose();
   }
 
@@ -242,11 +203,7 @@ class _CameraScreenState extends State<CameraScreen>
               children: [
                 ShellHeader(
                   status: 'simulator',
-                  leading: IconButton(
-                    icon: const Icon(Icons.chevron_left),
-                    tooltip: 'Back',
-                    onPressed: () => Navigator.pop(context),
-                  ),
+                  leading: IconButton(icon: const Icon(Icons.chevron_left), tooltip: 'Back', onPressed: () => Navigator.pop(context)),
                 ),
                 Expanded(
                   child: Center(
@@ -259,8 +216,7 @@ class _CameraScreenState extends State<CameraScreen>
                           child: SectionLabel(
                             icon: Icons.videocam_off_outlined,
                             title: 'No camera available',
-                            subtitle:
-                                'Run on a physical device to capture a Colombo image.',
+                            subtitle: 'Run on a physical device to capture a Colombo image.',
                             color: ManzoniColors.desert,
                           ),
                         ),
@@ -291,12 +247,7 @@ class _CameraScreenState extends State<CameraScreen>
                     children: [
                       IconButton(
                         icon: const Icon(Icons.settings, color: Colors.white),
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => SettingsScreen(store: widget.store),
-                          ),
-                        ),
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(store: widget.store))),
                       ),
                     ],
                   ),
@@ -339,12 +290,7 @@ class _CameraScreenState extends State<CameraScreen>
             padding: EdgeInsets.fromLTRB(20, 16, 20, 20),
             child: Panel(
               padding: EdgeInsets.all(18),
-              child: SectionLabel(
-                icon: Icons.videocam_off_outlined,
-                title: 'No camera available',
-                subtitle: 'The simulator does not expose a device camera.',
-                color: ManzoniColors.desert,
-              ),
+              child: SectionLabel(icon: Icons.videocam_off_outlined, title: 'No camera available', subtitle: 'The simulator does not expose a device camera.', color: ManzoniColors.desert),
             ),
           ),
         ),
@@ -362,8 +308,7 @@ class _CameraScreenState extends State<CameraScreen>
               child: SectionLabel(
                 icon: Icons.camera_alt_outlined,
                 title: 'Capture',
-                subtitle:
-                    '${widget.cameras.length} camera${widget.cameras.length == 1 ? '' : 's'} ready for Colombo upload.',
+                subtitle: '${widget.cameras.length} camera${widget.cameras.length == 1 ? '' : 's'} ready for Colombo upload.',
                 color: ManzoniColors.sea,
               ),
             ),
@@ -376,9 +321,7 @@ class _CameraScreenState extends State<CameraScreen>
                 decoration: BoxDecoration(
                   color: Colors.black,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.1),
-                  ),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
@@ -396,15 +339,7 @@ class _CameraScreenState extends State<CameraScreen>
                             SizedBox(
                               width: 56,
                               child: widget.cameras.length > 1
-                                  ? IconButton(
-                                      icon: const Icon(
-                                        Icons.flip_camera_ios_outlined,
-                                      ),
-                                      tooltip: 'Switch camera',
-                                      onPressed: _switching
-                                          ? null
-                                          : _switchCamera,
-                                    )
+                                  ? IconButton(icon: const Icon(Icons.flip_camera_ios_outlined), tooltip: 'Switch camera', onPressed: _switching ? null : _switchCamera)
                                   : null,
                             ),
                             const SizedBox(width: 22),
@@ -444,11 +379,7 @@ class _CameraScreenState extends State<CameraScreen>
               ),
               if (widget.embedded) ...[
                 const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: _initializing ? null : _startCamera,
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('Retry Camera'),
-                ),
+                FilledButton.icon(onPressed: _initializing ? null : _startCamera, icon: const Icon(Icons.refresh_rounded), label: const Text('Retry Camera')),
               ],
             ],
           ),
@@ -457,9 +388,7 @@ class _CameraScreenState extends State<CameraScreen>
     }
 
     final controller = _controller;
-    if (_initializing ||
-        controller == null ||
-        !controller.value.isInitialized) {
+    if (_initializing || controller == null || !controller.value.isInitialized) {
       return const Center(child: CircularProgressIndicator());
     }
 
@@ -475,8 +404,7 @@ class _CameraScreenState extends State<CameraScreen>
                 },
                 onScaleUpdate: (details) {
                   if (_minZoom == _maxZoom) return;
-                  final newZoom =
-                      (_baseZoom * details.scale).clamp(_minZoom, _maxZoom);
+                  final newZoom = (_baseZoom * details.scale).clamp(_minZoom, _maxZoom);
                   if (newZoom != _currentZoom) {
                     setState(() => _currentZoom = newZoom);
                     controller.setZoomLevel(newZoom);
@@ -530,18 +458,12 @@ class _CameraScreenState extends State<CameraScreen>
       foregroundColor: Colors.black,
       elevation: 0,
       shape: const CircleBorder(),
-      child: _capturing
-          ? const CircularProgressIndicator(color: Colors.black)
-          : const SizedBox(),
+      child: _capturing ? const CircularProgressIndicator(color: Colors.black) : const SizedBox(),
     );
   }
 
   bool _canCapture(CameraController? controller) {
-    return controller != null &&
-        controller.value.isInitialized &&
-        _appActive &&
-        !_initializing &&
-        !_capturing;
+    return controller != null && controller.value.isInitialized && _appActive && !_initializing && !_capturing;
   }
 }
 
@@ -560,28 +482,13 @@ class _CameraStartPanel extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.camera_alt_outlined,
-                size: 42,
-                color: ManzoniColors.textSecondary.withValues(alpha: 0.9),
-              ),
+              Icon(Icons.camera_alt_outlined, size: 42, color: ManzoniColors.textSecondary.withValues(alpha: 0.9)),
               const SizedBox(height: 14),
-              Text(
-                'Camera is idle',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+              Text('Camera is idle', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              Text(
-                'Start a capture session when you are ready.',
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
+              Text('Start a capture session when you are ready.', style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
               const SizedBox(height: 18),
-              FilledButton.icon(
-                onPressed: onStart,
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('Start Camera'),
-              ),
+              FilledButton.icon(onPressed: onStart, icon: const Icon(Icons.play_arrow_rounded), label: const Text('Start Camera')),
             ],
           ),
         ),

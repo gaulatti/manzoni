@@ -10,17 +10,11 @@ import 'src/theme/manzoni_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-  
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+
   logDebug('main: widgets initialized');
   final camerasFuture = traceDebug('main.availableCameras', availableCameras);
-  final storeFuture = traceDebug(
-    'main.SettingsStore.create',
-    SettingsStore.create,
-  );
+  final storeFuture = traceDebug('main.SettingsStore.create', SettingsStore.create);
 
   final store = await storeFuture;
   await traceDebug('main.SettingsStore.preload', store.load);
@@ -45,4 +39,3 @@ class ManzoniApp extends StatelessWidget {
     );
   }
 }
-
