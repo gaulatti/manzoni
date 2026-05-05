@@ -1,20 +1,109 @@
 import 'package:camera/camera.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'review_upload_screen.dart';
 import 'settings_screen.dart';
+import 'photo_library_screen.dart';
 import '../debug_log.dart';
+import '../services/colombo_api_client.dart';
 import '../services/settings_store.dart';
+import '../services/upload_queue.dart';
 import '../theme/manzoni_theme.dart';
 
+class _UploadQueueBanner extends StatelessWidget {
+  const _UploadQueueBanner({required this.queue});
+  final UploadQueue queue;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: queue,
+      builder: (context, _) {
+        if (!queue.hasTasks) return const SizedBox.shrink();
+        final total = queue.tasks.length;
+        final success = queue.successCount;
+        final failed = queue.failedCount;
+        final uploading = queue.isUploading;
+        final activeTask = queue.tasks.where((t) => t.status == UploadStatus.uploading).firstOrNull;
+        final progress = activeTask?.progress ?? (uploading ? 50 : 100);
+        final allComplete = success + failed == total && !uploading;
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: GestureDetector(
+            onTap: allComplete ? queue.clearCompleted : queue.retryFailed,
+            child: Material(
+              color: failed > 0 ? ManzoniColors.terracotta.withValues(alpha: 0.9) : ManzoniColors.sea.withValues(alpha: 0.9),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    if (uploading)
+                      SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: progress / 100,
+                          color: Colors.white,
+                        ),
+                      )
+                    else if (failed > 0)
+                      const Icon(Icons.error, size: 16, color: Colors.white)
+                    else
+                      const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            allComplete
+                                ? (failed > 0 ? 'Upload complete ($success/$total succeeded)' : '$total uploaded')
+                                : '${success + queue.tasks.where((t) => t.status == UploadStatus.uploading).length}/$total uploading',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          if (failed > 0 && !uploading)
+                            Text(
+                              'Tap to retry failed',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.8),
+                                fontSize: 11,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (allComplete)
+                      GestureDetector(
+                        onTap: () => queue.clearCompleted(),
+                        child: const Icon(Icons.close, color: Colors.white, size: 20),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// Screen that shows a live camera preview and allows the user to capture
-/// a still image, then forwards to [ReviewUploadScreen].
+/// a still image, then uploads it immediately.
 class CameraScreen extends StatefulWidget {
-  const CameraScreen({super.key, required this.cameras, required this.store, this.embedded = false});
+  const CameraScreen({super.key, required this.cameras, required this.store, required this.uploadQueue});
 
   final List<CameraDescription> cameras;
   final SettingsStore store;
-  final bool embedded;
+  final UploadQueue uploadQueue;
 
   @override
   State<CameraScreen> createState() => _CameraScreenState();
@@ -24,7 +113,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   CameraController? _controller;
   int _cameraIndex = 0;
   int _cameraSession = 0;
-  bool _cameraRequested = false;
   bool _initializing = false;
   bool _capturing = false;
   bool _switching = false;
@@ -42,19 +130,14 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     logDebug('CameraScreen: initState with ${widget.cameras.length} camera(s)');
     WidgetsBinding.instance.addObserver(this);
-    _cameraRequested = !widget.embedded;
     if (widget.cameras.isEmpty) {
       _error = 'No cameras found on this device.';
-    } else if (_cameraRequested) {
+    } else {
       _initCamera(widget.cameras[_cameraIndex]);
     }
   }
 
   Future<void> _initCamera(CameraDescription desc) async {
-    if (_initializing) {
-      logDebug('CameraScreen.initCamera: ignored while initializing');
-      return;
-    }
     final session = ++_cameraSession;
     setState(() {
       _initializing = true;
@@ -68,7 +151,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       await traceDebug('CameraScreen.initCamera[$session].disposePrevious', previous.dispose);
     }
 
-    final controller = CameraController(desc, ResolutionPreset.high, enableAudio: false);
+    final controller = CameraController(desc, ResolutionPreset.max, enableAudio: false);
     _controller = controller;
 
     try {
@@ -104,13 +187,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _startCamera() async {
-    logDebug('CameraScreen.startCamera: pressed');
-    if (widget.cameras.isEmpty) return;
-    _cameraRequested = true;
-    await _initCamera(widget.cameras[_cameraIndex]);
-  }
-
   Future<void> _disposeController() async {
     final controller = _controller;
     _controller = null;
@@ -122,12 +198,16 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     logDebug('CameraScreen.lifecycle: $state');
-    _appActive = state == AppLifecycleState.resumed;
-    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive || state == AppLifecycleState.hidden) {
+      _appActive = false;
       _cameraSession++;
+      _initializing = false;
       _disposeController();
-    } else if (state == AppLifecycleState.resumed && _cameraRequested && widget.cameras.isNotEmpty) {
+    } else if (state == AppLifecycleState.resumed && widget.cameras.isNotEmpty) {
+      _appActive = true;
       _initCamera(widget.cameras[_cameraIndex]);
+    } else {
+      _appActive = state == AppLifecycleState.resumed;
     }
   }
 
@@ -140,24 +220,47 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
     final activeController = controller!;
     setState(() => _capturing = true);
+    
     try {
+      final settings = await traceDebug('CameraScreen.store.load', () => widget.store.load(forceRefresh: true));
+      final baseUrl = settings['baseUrl'];
+      final username = settings['username'];
+      final password = settings['password'];
+
+      if (baseUrl == null || baseUrl.isEmpty || username == null || username.isEmpty || password == null || password.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please configure Base URL, Username and Password in Settings to upload.')));
+        }
+        return;
+      }
+      
+      final client = ColomboApiClient(baseUrl: baseUrl, username: username, password: password);
+
       final file = await traceDebug('CameraScreen.capture.takePicture', activeController.takePicture);
       if (!mounted) return;
-      logDebug('CameraScreen.capture: pushing review for ${file.path}');
-      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ReviewUploadScreen(imagePath: file.path, store: widget.store),
-        ),
+      
+      logDebug('CameraScreen.capture: uploading ${file.path}');
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uploading picture...'), duration: Duration(days: 1)));
+      
+      final result = await traceDebug(
+        'CameraScreen.client.uploadPhoto',
+        () => client.uploadPhoto(filePath: file.path),
       );
+      
       if (mounted) {
-        SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload successful! Assignment ID: ${result.assignmentId}')));
       }
-      logDebug('CameraScreen.capture: review returned');
+    } on DioException catch (e) {
+      if (mounted) {
+        logDebug('CameraScreen.capture: DioException ${e.type}');
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: ${_dioErrorMessage(e)}')));
+      }
     } catch (e) {
       if (mounted) {
         logDebug('CameraScreen.capture: showing failure: $e');
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Capture failed: $e')));
       }
     } finally {
@@ -168,16 +271,52 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _switchCamera() async {
-    logDebug('CameraScreen.switchCamera: pressed');
-    if (widget.cameras.length < 2 || _switching || _initializing) return;
-    setState(() => _switching = true);
-    _cameraIndex = (_cameraIndex + 1) % widget.cameras.length;
-    try {
-      await _initCamera(widget.cameras[_cameraIndex]);
-    } finally {
-      if (mounted) setState(() => _switching = false);
+  String _dioErrorMessage(DioException e) {
+    if (e.response != null) {
+      return 'Server error ${e.response!.statusCode}: ${e.response!.data ?? e.message}';
     }
+    switch (e.type) {
+      case DioExceptionType.connectionTimeout:
+      case DioExceptionType.receiveTimeout:
+      case DioExceptionType.sendTimeout:
+        return 'Request timed out. Check your network connection.';
+      case DioExceptionType.connectionError:
+        return 'Could not connect to server. Check the Base URL in Settings.';
+      default:
+        return e.message ?? 'Unknown network error.';
+    }
+  }
+
+  Future<void> _openPhotoLibrary() async {
+    logDebug('CameraScreen.openPhotoLibrary: pressed');
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PhotoLibraryPicker(store: widget.store, queue: widget.uploadQueue),
+    );
+  }
+
+  String _lensLabel(CameraDescription desc) {
+    final name = desc.name.toLowerCase();
+    if (name.contains('ultra') || name.contains('wide-angle') && !name.contains('back')) {
+      return '0.5';
+    }
+    if (name.contains('telephoto')) {
+      if (name.contains('3') || name.contains('77')) return '3';
+      if (name.contains('5') || name.contains('120')) return '5';
+      if (name.contains('2') || name.contains('52')) return '2';
+      return '3';
+    }
+    final backCameras = widget.cameras.where((c) => c.lensDirection == CameraLensDirection.back).toList();
+    if (backCameras.length > 1) {
+      final idx = backCameras.indexOf(desc);
+      if (idx == 0) return '1';
+      if (idx == 1) return '0.5';
+      if (idx == 2) return '3';
+      if (idx == 3) return '5';
+    }
+    return '1';
   }
 
   @override
@@ -193,7 +332,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     logDebug('CameraScreen.build');
-    if (widget.embedded) return _buildEmbedded();
 
     if (widget.cameras.isEmpty) {
       return Scaffold(
@@ -246,6 +384,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       IconButton(
+                        icon: const Icon(Icons.photo_library, color: Colors.white),
+                        onPressed: _openPhotoLibrary,
+                        tooltip: 'Upload from library',
+                      ),
+                      IconButton(
                         icon: const Icon(Icons.settings, color: Colors.white),
                         onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen(store: widget.store))),
                       ),
@@ -253,106 +396,20 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                   ),
                 ),
                 const Spacer(),
+                _UploadQueueBanner(queue: widget.uploadQueue),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 32.0),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      const SizedBox(width: 48), // Spacer to balance the row
+                      const SizedBox(width: 48),
                       _buildCaptureButton(),
-                      if (widget.cameras.length > 1)
-                        IconButton(
-                          icon: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 36),
-                          onPressed: _switchCamera,
-                          tooltip: 'Switch camera',
-                        )
-                      else
-                        const SizedBox(width: 48), // Spacer to balance if no switch button
+                      const SizedBox(width: 48),
                     ],
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmbedded() {
-    if (widget.cameras.isEmpty) {
-      return Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560),
-          child: const Padding(
-            padding: EdgeInsets.fromLTRB(20, 16, 20, 20),
-            child: Panel(
-              padding: EdgeInsets.all(18),
-              child: SectionLabel(icon: Icons.videocam_off_outlined, title: 'No camera available', subtitle: 'The simulator does not expose a device camera.', color: ManzoniColors.desert),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-      child: Column(
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 620),
-            child: Panel(
-              padding: const EdgeInsets.all(18),
-              child: SectionLabel(
-                icon: Icons.camera_alt_outlined,
-                title: 'Capture',
-                subtitle: '${widget.cameras.length} camera${widget.cameras.length == 1 ? '' : 's'} ready for Colombo upload.',
-                color: ManzoniColors.sea,
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Expanded(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 620),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      _buildBody(),
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        bottom: 16,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 56,
-                              child: widget.cameras.length > 1
-                                  ? IconButton(icon: const Icon(Icons.flip_camera_ios_outlined), tooltip: 'Switch camera', onPressed: _switching ? null : _switchCamera)
-                                  : null,
-                            ),
-                            const SizedBox(width: 22),
-                            _buildCaptureButton(),
-                            const SizedBox(width: 22),
-                            const SizedBox(width: 56),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             ),
           ),
         ],
@@ -361,10 +418,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Widget _buildBody() {
-    if (!_cameraRequested && widget.embedded) {
-      return _CameraStartPanel(onStart: _startCamera);
-    }
-
     if (_error != null) {
       return Center(
         child: Padding(
@@ -372,15 +425,25 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              const Icon(Icons.videocam_off_outlined, color: Colors.white70, size: 48),
+              const SizedBox(height: 16),
               Text(
-                _error!,
-                style: const TextStyle(color: Colors.white),
+                'Camera disconnected',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.white),
                 textAlign: TextAlign.center,
               ),
-              if (widget.embedded) ...[
-                const SizedBox(height: 16),
-                FilledButton.icon(onPressed: _initializing ? null : _startCamera, icon: const Icon(Icons.refresh_rounded), label: const Text('Retry Camera')),
-              ],
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.white70),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: _initializing ? null : () => _initCamera(widget.cameras[_cameraIndex]),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Reconnect Camera'),
+              ),
             ],
           ),
         ),
@@ -414,10 +477,16 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                   final double x = details.localPosition.dx / constraints.maxWidth;
                   final double y = details.localPosition.dy / constraints.maxHeight;
                   controller.setFocusPoint(Offset(x, y));
-                  // Optionally, we could show a focus indicator here
                 },
                 child: CameraPreview(controller),
               ),
+              if (widget.cameras.where((c) => c.lensDirection == CameraLensDirection.back).length > 1 && _controller?.description.lensDirection != CameraLensDirection.front)
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top,
+                  left: 0,
+                  right: 0,
+                  child: _buildLensChips(),
+                ),
               if (_maxZoom > _minZoom)
                 Positioned(
                   right: 16,
@@ -450,6 +519,60 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 
+  Widget _buildLensChips() {
+    final backCameras = widget.cameras.where((c) => c.lensDirection == CameraLensDirection.back).toList();
+    if (backCameras.length <= 1) return const SizedBox.shrink();
+
+    final labels = backCameras.map((c) => _lensLabel(c)).toList();
+
+    return Container(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 8,
+        bottom: 8,
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisAlignment: backCameras.length <= 3 ? MainAxisAlignment.center : MainAxisAlignment.start,
+          children: List.generate(backCameras.length * 2 - 1, (i) {
+            if (i.isOdd) return const SizedBox(width: 24);
+            final idx = i ~/ 2;
+            final camera = backCameras[idx];
+            final isSelected = widget.cameras.indexOf(camera) == _cameraIndex;
+            final label = labels[idx];
+            return GestureDetector(
+              onTap: () => _selectLens(widget.cameras.indexOf(camera)),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.white54,
+                  fontSize: 15,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectLens(int index) async {
+    if (index == _cameraIndex || _switching || _initializing) return;
+    logDebug('CameraScreen.selectLens: $index');
+    setState(() {
+      _cameraIndex = index;
+      _switching = true;
+    });
+    try {
+      await _initCamera(widget.cameras[_cameraIndex]);
+    } finally {
+      if (mounted) setState(() => _switching = false);
+    }
+  }
+
   Widget _buildCaptureButton() {
     final controller = _controller;
     return FloatingActionButton.large(
@@ -464,35 +587,5 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   bool _canCapture(CameraController? controller) {
     return controller != null && controller.value.isInitialized && _appActive && !_initializing && !_capturing;
-  }
-}
-
-class _CameraStartPanel extends StatelessWidget {
-  const _CameraStartPanel({required this.onStart});
-
-  final VoidCallback onStart;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 360),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.camera_alt_outlined, size: 42, color: ManzoniColors.textSecondary.withValues(alpha: 0.9)),
-              const SizedBox(height: 14),
-              Text('Camera is idle', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              Text('Start a capture session when you are ready.', style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
-              const SizedBox(height: 18),
-              FilledButton.icon(onPressed: onStart, icon: const Icon(Icons.play_arrow_rounded), label: const Text('Start Camera')),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }

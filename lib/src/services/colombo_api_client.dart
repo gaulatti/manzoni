@@ -6,9 +6,9 @@ import '../debug_log.dart';
 
 /// Result returned by a successful upload.
 class UploadResult {
-  const UploadResult({required this.s3Url, required this.assignmentId});
+  const UploadResult({this.s3Url, required this.assignmentId});
 
-  final String s3Url;
+  final String? s3Url;
   final String assignmentId;
 
   @override
@@ -54,13 +54,17 @@ class ColomboApiClient {
   /// Throws a [DioException] on HTTP errors or network failures.
   Future<UploadResult> uploadPhoto({
     required String filePath,
+    String? contentType,
     void Function(int sent, int total)? onSendProgress,
   }) async {
     logDebug('ColomboApiClient.uploadPhoto: preparing multipart for $filePath');
     final formData = FormData.fromMap({
       'file': await traceDebug(
         'ColomboApiClient.MultipartFile.fromFile',
-        () => MultipartFile.fromFile(filePath),
+        () => MultipartFile.fromFile(
+          filePath,
+          contentType: contentType != null ? DioMediaType.parse(contentType) : null,
+        ),
       ),
     });
 
@@ -102,9 +106,9 @@ class ColomboApiClient {
     final s3Url = body['s3_url'] as String?;
     final assignmentId = body['assignment_id']?.toString();
 
-    if (s3Url == null || assignmentId == null) {
+    if (assignmentId == null) {
       throw FormatException(
-        'Missing s3_url or assignment_id in response: $body',
+        'Missing assignment_id in response: $body',
       );
     }
 

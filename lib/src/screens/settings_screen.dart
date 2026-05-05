@@ -6,10 +6,11 @@ import '../theme/manzoni_theme.dart';
 
 /// Screen for entering and persisting Colombo connection settings.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.store, this.embedded = false});
+  const SettingsScreen({super.key, required this.store, this.embedded = false, this.closeAllOnSave = false});
 
   final SettingsStore store;
   final bool embedded;
+  final bool closeAllOnSave;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -91,9 +92,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       if (!mounted) return;
       logDebug('SettingsScreen.save: showing success');
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Settings saved.')));
+      if (widget.closeAllOnSave) {
+        Navigator.pop(context, true);
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Settings saved.')));
+      }
     } catch (e) {
       if (!mounted) return;
       logDebug('SettingsScreen.save: showing failure: $e');

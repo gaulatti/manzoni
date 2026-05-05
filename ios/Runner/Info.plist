@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Manzoni needs camera access to capture photos for upload to Colombo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Manzoni needs photo library access to select photos for upload to Colombo.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
