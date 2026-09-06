@@ -31,16 +31,25 @@ describe('Colombo accepted-upload contract', () => {
   });
 
   test('parses a 202 accepted receipt without requiring s3_url', () => {
-    expect(parseAcceptedUpload(202, JSON.stringify({ assignment_id: 42, status: 'accepted' }))).toEqual({
+    expect(parseAcceptedUpload(202, JSON.stringify({
+      assignment_id: 42,
+      operation_id: '5f1d0f8e-0000-4000-8000-000000000001',
+      status: 'accepted',
+    }))).toEqual({
       assignmentId: '42',
+      operationId: '5f1d0f8e-0000-4000-8000-000000000001',
       status: 'accepted',
     });
   });
 
   test.each([
-    [200, { assignment_id: '42', status: 'accepted' }],
-    [202, { assignment_id: '42', status: 'delivered' }],
-    [202, { status: 'accepted' }],
+    [200, { assignment_id: '42', operation_id: 'op-1', status: 'accepted' }],
+    [202, { assignment_id: '42', operation_id: 'op-1', status: 'delivered' }],
+    [202, { operation_id: 'op-1', status: 'accepted' }],
+    // Without an operation id this device could never learn whether the file
+    // was delivered, so the acceptance is unusable.
+    [202, { assignment_id: '42', status: 'accepted' }],
+    [202, { assignment_id: '42', operation_id: '   ', status: 'accepted' }],
   ])('rejects non-contract response %#', (status, body) => {
     expect(() => parseAcceptedUpload(status, JSON.stringify(body))).toThrow();
   });

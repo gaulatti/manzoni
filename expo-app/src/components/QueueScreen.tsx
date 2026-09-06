@@ -7,19 +7,58 @@ import { StatusBadge, type StatusBadgeVariant } from '@gaulatti/thompson/compone
 import { Heading, Text } from '@gaulatti/thompson/components/typography';
 import { Image, ScrollView, StyleSheet, View } from 'react-native';
 
-import type { UploadQueueItem, UploadStatus } from '../domain/uploadQueue';
+import { canRetryUpload, isDeletable, presentationState, type PresentationState } from '../domain/reconciliation';
+import type { UploadQueueItem } from '../domain/uploadQueue';
 import { useUploadQueue } from '../hooks/useUploadQueue';
 import type { UploadQueueController } from '../services/uploadQueueController';
 
-const STATUS_PRESENTATION: Record<UploadStatus, { label: string; variant: StatusBadgeVariant }> = {
-  accepted: { label: 'Accepted by Colombo', variant: 'live' },
-  failed: { label: 'Failed', variant: 'offline' },
-  pending: { label: 'Pending', variant: 'warning' },
-  uploading: { label: 'Uploading', variant: 'info' },
+/**
+ * One label per state Colombo can be in, so acceptance is never dressed up as
+ * delivery and an unknown answer is never dressed up as either outcome.
+ */
+const STATUS_PRESENTATION: Record<PresentationState, { detail: string; label: string; variant: StatusBadgeVariant }> = {
+  accepted: {
+    detail: 'Colombo accepted the upload and is delivering it. Final delivery is not confirmed yet.',
+    label: 'Accepted by Colombo',
+    variant: 'info',
+  },
+  'callback-confirmed': {
+    detail: 'Colombo delivered the file and the newsroom confirmed receipt.',
+    label: 'Confirmed by the newsroom',
+    variant: 'live',
+  },
+  delivered: {
+    detail: 'Colombo delivered the file. Waiting for the newsroom to confirm.',
+    label: 'Delivered',
+    variant: 'live',
+  },
+  expired: {
+    detail: 'Colombo expired this operation before it was delivered. Upload the photo again.',
+    label: 'Expired',
+    variant: 'offline',
+  },
+  failed: { detail: '', label: 'Failed', variant: 'offline' },
+  pending: { detail: 'Waiting to upload.', label: 'Pending', variant: 'warning' },
+  unknown: {
+    detail: 'Colombo could not be reached for this upload. Its delivery is still unknown; it has not failed.',
+    label: 'Delivery unknown',
+    variant: 'warning',
+  },
+  uploading: { detail: '', label: 'Uploading', variant: 'info' },
+};
+
+const FAILURE_EXPLANATION: Record<string, string> = {
+  corrupt_content: 'Colombo could not read the uploaded file.',
+  dependency_denied: 'A service Colombo depends on refused the delivery.',
+  invalid_metadata: 'Colombo rejected the upload metadata.',
+  retry_exhausted: 'Colombo retried delivery until its attempts ran out.',
+  tenant_missing: 'The account for this upload is no longer registered.',
 };
 
 function QueueCard({ controller, item }: { controller: UploadQueueController; item: UploadQueueItem }) {
-  const presentation = STATUS_PRESENTATION[item.status];
+  const state = presentationState(item);
+  const presentation = STATUS_PRESENTATION[state];
+  const retryable = canRetryUpload(item);
   return (
     <Card padding="sm">
       <View style={styles.itemRow}>
@@ -30,17 +69,21 @@ function QueueCard({ controller, item }: { controller: UploadQueueController; it
             <Text size="xs" tone="secondary">{item.source === 'camera' ? 'Camera' : 'Library'}</Text>
           </View>
           <Text numberOfLines={1} size="sm" weight="600">{item.fileName}</Text>
-          {item.status === 'uploading' ? <Progress showLabel value={item.progress} /> : null}
-          {item.status === 'accepted' ? (
-            <Text family="secondary" size="xs" tone="secondary">
-              Assignment {item.assignmentId}. Colombo accepted the upload; final delivery is not yet known.
+          {state === 'uploading' ? <Progress showLabel value={item.progress} /> : null}
+          {presentation.detail ? (
+            <Text family="secondary" size="xs" tone={state === 'expired' ? 'danger' : 'secondary'}>
+              {item.assignmentId ? `Assignment ${item.assignmentId}. ` : ''}{presentation.detail}
             </Text>
           ) : null}
-          {item.status === 'failed' ? (
-            <Stack gap="detail">
-              <Text family="secondary" size="xs" tone="danger">{item.errorMessage}</Text>
-              <Button onPress={() => void controller.retry(item.id)} size="sm" variant="outline">Retry</Button>
-            </Stack>
+          {state === 'failed' ? (
+            <Text family="secondary" size="xs" tone="danger">
+              {(item.serverFailureCode ? FAILURE_EXPLANATION[item.serverFailureCode] : null) ?? item.errorMessage}
+            </Text>
+          ) : null}
+          {retryable ? (
+            <Button onPress={() => void controller.retry(item.id)} size="sm" variant="outline">
+              {item.operationId ? 'Upload again' : 'Retry'}
+            </Button>
           ) : null}
         </Stack>
       </View>
@@ -50,8 +93,9 @@ function QueueCard({ controller, item }: { controller: UploadQueueController; it
 
 export function QueueScreen({ controller }: { controller: UploadQueueController }) {
   const snapshot = useUploadQueue(controller);
-  const failedCount = snapshot.items.filter((item) => item.status === 'failed').length;
-  const acceptedCount = snapshot.items.filter((item) => item.status === 'accepted').length;
+  const retryableCount = snapshot.items.filter(canRetryUpload).length;
+  const settledCount = snapshot.items.filter(isDeletable).length;
+  const awaitingDelivery = snapshot.items.filter((item) => item.operationId && !isDeletable(item)).length;
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
@@ -62,6 +106,7 @@ export function QueueScreen({ controller }: { controller: UploadQueueController 
             <Text size="sm" tone="secondary">SQLite-backed state and app-owned media copies survive relaunch.</Text>
           </View>
           {snapshot.isProcessing ? <StatusBadge label="Processing" variant="info" /> : null}
+          {snapshot.isReconciling ? <StatusBadge label="Checking delivery" variant="info" /> : null}
         </View>
 
         {snapshot.interruptedCount > 0 ? (
@@ -75,10 +120,15 @@ export function QueueScreen({ controller }: { controller: UploadQueueController 
           <Alert description={snapshot.activeError} onClose={() => controller.dismissError()} title="Queue paused" variant="warning" />
         ) : null}
 
-        {(failedCount > 0 || acceptedCount > 0) ? (
+        {(retryableCount > 0 || settledCount > 0 || awaitingDelivery > 0) ? (
           <View style={styles.actions}>
-            {failedCount > 0 ? <Button onPress={() => void controller.retryAll()} size="sm" variant="outline">Retry failed ({failedCount})</Button> : null}
-            {acceptedCount > 0 ? <Button onPress={() => void controller.clearAccepted()} size="sm" variant="ghost">Clear accepted ({acceptedCount})</Button> : null}
+            {awaitingDelivery > 0 ? (
+              <Button onPress={() => void controller.reconcile('user')} size="sm" variant="outline">
+                Check delivery ({awaitingDelivery})
+              </Button>
+            ) : null}
+            {retryableCount > 0 ? <Button onPress={() => void controller.retryAll()} size="sm" variant="outline">Retry failed ({retryableCount})</Button> : null}
+            {settledCount > 0 ? <Button onPress={() => void controller.clearSettled()} size="sm" variant="ghost">Clear settled ({settledCount})</Button> : null}
           </View>
         ) : null}
 

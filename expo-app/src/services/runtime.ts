@@ -1,5 +1,6 @@
 import { openDatabaseAsync } from 'expo-sqlite';
 
+import { HttpColomboReceipts } from './colomboReceipts';
 import { ExpoColomboUploader } from './colomboUploader';
 import { SecureCredentialsStore } from './credentialsStore';
 import { ExpoDurableMediaStore } from './durableMediaStore';
@@ -19,6 +20,7 @@ export async function createManzoniRuntime(): Promise<ManzoniRuntime> {
     new ExpoDurableMediaStore(),
     credentialsStore,
     new ExpoColomboUploader(),
+    new HttpColomboReceipts(),
   );
   await controller.initialize();
   return { controller, credentialsStore };

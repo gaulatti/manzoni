@@ -17,7 +17,8 @@ Camera captures and library selections both follow the same path:
 2. Copy the selected media into the app document directory under `upload-queue/`.
 3. Insert metadata and lifecycle state into `manzoni-upload-queue.db`.
 4. Upload sequentially using the credentials loaded from SecureStore.
-5. Record Colombo's accepted receipt, or retain a retryable failure.
+5. Record Colombo's accepted receipt — including its `operation_id` — or retain a retryable failure.
+6. Poll `GET /uploads/{operation_id}` until Colombo reports a terminal outcome.
 
 The SQLite table deliberately contains no credentials. SecureStore receives one serialized credential payload so a failed write cannot leave a mixed set of keys. On startup, any row left in `uploading` is changed to `failed` with an interrupted-upload message so the user can retry it, and copied media without a queue row is removed. Clearing an accepted row also removes its app-owned media copy.
 
@@ -53,10 +54,53 @@ file: <image bytes>
 The only successful client receipt is:
 
 ```json
-{"status":"accepted","assignment_id":"42"}
+{"status":"accepted","assignment_id":"42","operation_id":"5f1d0f8e-…"}
 ```
 
-It must arrive with HTTP `202`. The UI labels this state **Accepted by Colombo**. It does not require `s3_url`, and it never describes acceptance as delivery. Only a future final Colombo receipt may produce a delivered state.
+It must arrive with HTTP `202`. The UI labels this state **Accepted by Colombo**. It does not require `s3_url`, and it never describes acceptance as delivery. The `operation_id` is required: without it the client could never learn the real outcome, so an acceptance that omits it is rejected.
+
+### Delivery reconciliation
+
+Colombo returns `202` once a file is in a restart-safe spool. Delivery to S3 and
+the CMS callback happen afterwards and are retried independently, so **acceptance
+is a promise to deliver, not a completed delivery**. The client learns the real
+outcome only by polling the landed receipt contract:
+
+```text
+GET <baseUrl>/uploads/<operation_id>
+X-Colombo-Username: <username>
+X-Colombo-Password: <password-or-key>
+```
+
+Every state Colombo reports maps to exactly one thing the queue shows:
+
+| Colombo `state` | Queue shows | Terminal | May upload again |
+| --- | --- | --- | --- |
+| `accepted`, `uploading` | Accepted by Colombo | no | no |
+| `delivered` | Delivered | no | no |
+| `callback-confirmed` | Confirmed by the newsroom | yes | no |
+| `failed` | Failed, with Colombo's bounded failure code | yes | yes |
+| `expired` (HTTP `410`) | Expired | yes | yes |
+| *no answer* | **Delivery unknown** | no | no |
+
+Two rules are enforced in `src/domain/reconciliation.ts` rather than in the UI:
+
+- **No local timer may infer delivery.** A row advances only on a receipt. The
+  foreground poll only *asks*.
+- **A status failure is not an answer.** A `404`, a `401`, a `5xx`, a network
+  error, or a receipt whose `state` is outside the contract leaves the row
+  `unknown` and retryable — never `failed`, never `delivered`. Re-uploading is
+  refused while Colombo may still be working, so a transient outage can never
+  become a duplicate delivery.
+
+Reconciliation runs on launch, on every return to the foreground, on a slow
+foreground poll, and on the queue's **Check delivery** button. A user refresh
+ignores per-row backoff; every other trigger respects it. Rows are removed only
+when the user asks *and* Colombo has reached a terminal state.
+
+An install created before this release is migrated with `ALTER TABLE ADD COLUMN`
+(guarded by `PRAGMA user_version`), so existing rows and their app-owned media
+copies survive.
 
 ### Verify Expo
 
