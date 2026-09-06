@@ -1,0 +1,56 @@
+{
+  "name": "manzoni-expo",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "main": "index.ts",
+  "dependencies": {
+    "@expo-google-fonts/encode-sans": "^0.4.3",
+    "@expo-google-fonts/libre-franklin": "^0.4.2",
+    "@gaulatti/bleecker": "0.1.41",
+    "@gaulatti/thompson": "github:gaulatti/thompson#b0fba61b1860a27f1a580bd1b1e7c67bdfcef38b",
+    "@react-native-community/datetimepicker": "9.1.0",
+    "@react-native-community/slider": "5.2.0",
+    "expo": "~57.0.20",
+    "expo-camera": "~57.0.4",
+    "expo-device": "~57.0.1",
+    "expo-file-system": "~57.0.6",
+    "expo-font": "~57.0.3",
+    "expo-image-picker": "~57.0.16",
+    "expo-secure-store": "~57.0.3",
+    "expo-sqlite": "~57.0.2",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.2",
+    "react-native-webview": "13.16.1"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/react": "~19.2.2",
+    "jest-expo": "~57.0.5",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "jest --runInBand",
+    "export": "expo export --platform all --output-dir dist",
+    "check": "npm run typecheck && npm test && npm run export"
+  },
+  "jest": {
+    "preset": "jest-expo",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/dist/"
+    ]
+  },
+  "private": true
+}
