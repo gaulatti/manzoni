@@ -47,6 +47,19 @@ export class ExpoDurableMediaStore implements DurableMediaStore {
     };
   }
 
+  async reconcile(referencedFileUris: readonly string[]): Promise<number> {
+    this.queueDirectory.create({ idempotent: true, intermediates: true });
+    const referenced = new Set(referencedFileUris);
+    const orphaned = this.queueDirectory
+      .list()
+      .filter((entry): entry is File => entry instanceof File && !referenced.has(entry.uri));
+
+    for (const file of orphaned) {
+      file.delete();
+    }
+    return orphaned.length;
+  }
+
   async remove(fileUri: string): Promise<void> {
     const file = new File(fileUri);
     if (file.exists) {

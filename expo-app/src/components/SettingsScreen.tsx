@@ -25,15 +25,21 @@ export function SettingsScreen({ controller, credentialsStore }: SettingsScreenP
 
   useEffect(() => {
     let mounted = true;
-    void credentialsStore.load().then((credentials) => {
-      if (!mounted) return;
-      if (credentials) {
-        setBaseUrl(credentials.baseUrl);
-        setUsername(credentials.username);
-        setPassword(credentials.password);
-      }
-      setBusy(false);
-    });
+    void credentialsStore.load()
+      .then((credentials) => {
+        if (!mounted) return;
+        if (credentials) {
+          setBaseUrl(credentials.baseUrl);
+          setUsername(credentials.username);
+          setPassword(credentials.password);
+        }
+        setBusy(false);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setMessage({ text: 'Credentials could not be loaded from secure storage.', type: 'error' });
+        setBusy(false);
+      });
     return () => {
       mounted = false;
     };

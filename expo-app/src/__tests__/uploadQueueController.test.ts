@@ -79,7 +79,11 @@ function runtime(
 ) {
   return new UploadQueueController(
     store,
-    options.mediaStore ?? { persist: async (item, id) => ({ fileName: `${id}.jpg`, fileUri: `file:///documents/${id}.jpg`, mimeType: item.mimeType ?? 'image/jpeg' }), remove: async () => undefined },
+    options.mediaStore ?? {
+      persist: async (item, id) => ({ fileName: `${id}.jpg`, fileUri: `file:///documents/${id}.jpg`, mimeType: item.mimeType ?? 'image/jpeg' }),
+      reconcile: async () => 0,
+      remove: async () => undefined,
+    },
     options.credentialsStore ?? noCredentials,
     options.uploader ?? { upload: async () => ({ assignmentId: 'unused', status: 'accepted' }) },
     (() => { let value = 0; return () => `queue-${++value}`; })(),
@@ -110,6 +114,7 @@ describe('UploadQueueController', () => {
         events.push(`copy:${id}`);
         return { fileName: `${id}.jpg`, fileUri: `file:///documents/${id}.jpg`, mimeType: 'image/jpeg' };
       },
+      reconcile: async () => 0,
       remove: async () => undefined,
     };
     const controller = runtime(store, { mediaStore });
@@ -125,6 +130,22 @@ describe('UploadQueueController', () => {
       'insert:library:file:///documents/queue-2.jpg',
     ]);
     expect(store.items.map((item) => item.source)).toEqual(['camera', 'library']);
+  });
+
+  test('reconciles orphaned durable media against persisted queue rows on startup', async () => {
+    const store = new MemoryQueueStore([queueItem({ fileUri: 'file:///documents/upload-queue/kept.jpg' })]);
+    const reconcile = jest.fn(async () => 1);
+    const controller = runtime(store, {
+      mediaStore: {
+        persist: async () => ({ fileName: 'unused.jpg', fileUri: 'file:///unused.jpg', mimeType: 'image/jpeg' }),
+        reconcile,
+        remove: async () => undefined,
+      },
+    });
+
+    await controller.initialize();
+
+    expect(reconcile).toHaveBeenCalledWith(['file:///documents/upload-queue/kept.jpg']);
   });
 
   test('retry transitions a failed item through uploading to accepted', async () => {

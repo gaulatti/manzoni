@@ -19,7 +19,7 @@ Camera captures and library selections both follow the same path:
 4. Upload sequentially using the credentials loaded from SecureStore.
 5. Record Colombo's accepted receipt, or retain a retryable failure.
 
-The SQLite table deliberately contains no credentials. On startup, any row left in `uploading` is changed to `failed` with an interrupted-upload message so the user can retry it. Clearing an accepted row also removes its app-owned media copy.
+The SQLite table deliberately contains no credentials. SecureStore receives one serialized credential payload so a failed write cannot leave a mixed set of keys. On startup, any row left in `uploading` is changed to `failed` with an interrupted-upload message so the user can retry it, and copied media without a queue row is removed. Clearing an accepted row also removes its app-owned media copy.
 
 The camera screen owns permission, unavailable-camera, foreground/suspended, rear/front facing, available iOS lens, zoom, focus-mode, capture, and enqueue states. A simulator can exercise the unavailable-camera and library flows, but physical capture behavior must be verified on a real device before release.
 

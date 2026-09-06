@@ -47,6 +47,7 @@ export interface UploadQueueStore {
 
 export interface DurableMediaStore {
   persist(item: SelectedMedia, id: string): Promise<{ fileName: string; fileUri: string; mimeType: string }>;
+  reconcile(referencedFileUris: readonly string[]): Promise<number>;
   remove(fileUri: string): Promise<void>;
 }
 

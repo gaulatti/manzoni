@@ -65,6 +65,8 @@ export class UploadQueueController {
   async initialize(): Promise<void> {
     await this.store.initialize();
     this.interruptedCount = await this.store.reconcileInterrupted();
+    const persisted = await this.store.list();
+    await this.mediaStore.reconcile(persisted.map((item) => item.fileUri));
     await this.refresh();
     void this.processPending();
   }

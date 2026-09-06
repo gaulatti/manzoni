@@ -2,11 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import type { ColomboCredentials, CredentialsStore } from '../domain/uploadQueue';
 
-const KEYS = {
-  baseUrl: 'colombo_base_url',
-  password: 'colombo_password',
-  username: 'colombo_username',
-} as const;
+const CREDENTIALS_KEY = 'colombo_credentials_v1';
 
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, '');
@@ -14,17 +10,34 @@ function normalizeBaseUrl(value: string): string {
 
 export class SecureCredentialsStore implements CredentialsStore {
   async load(): Promise<ColomboCredentials | null> {
-    const [baseUrl, username, password] = await Promise.all([
-      SecureStore.getItemAsync(KEYS.baseUrl),
-      SecureStore.getItemAsync(KEYS.username),
-      SecureStore.getItemAsync(KEYS.password),
-    ]);
-
-    if (!baseUrl || !username || !password) {
+    const stored = await SecureStore.getItemAsync(CREDENTIALS_KEY);
+    if (!stored) {
       return null;
     }
 
-    return { baseUrl, password, username };
+    let credentials: Partial<ColomboCredentials>;
+    try {
+      credentials = JSON.parse(stored) as Partial<ColomboCredentials>;
+    } catch {
+      throw new Error('Stored Colombo credentials are invalid.');
+    }
+
+    if (
+      typeof credentials.baseUrl !== 'string' ||
+      typeof credentials.username !== 'string' ||
+      typeof credentials.password !== 'string' ||
+      !credentials.baseUrl ||
+      !credentials.username ||
+      !credentials.password
+    ) {
+      throw new Error('Stored Colombo credentials are invalid.');
+    }
+
+    return {
+      baseUrl: credentials.baseUrl,
+      password: credentials.password,
+      username: credentials.username,
+    };
   }
 
   async save(credentials: ColomboCredentials): Promise<void> {
@@ -34,10 +47,10 @@ export class SecureCredentialsStore implements CredentialsStore {
       throw new Error('Base URL, username, and password are required.');
     }
 
-    await Promise.all([
-      SecureStore.setItemAsync(KEYS.baseUrl, baseUrl),
-      SecureStore.setItemAsync(KEYS.username, username),
-      SecureStore.setItemAsync(KEYS.password, credentials.password),
-    ]);
+    await SecureStore.setItemAsync(CREDENTIALS_KEY, JSON.stringify({
+      baseUrl,
+      password: credentials.password,
+      username,
+    }));
   }
 }
