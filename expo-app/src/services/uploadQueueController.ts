@@ -1,4 +1,11 @@
+import {
+  applyReceiptOutcome,
+  canRetryUpload,
+  isDeletable,
+  reconcilableItems,
+} from '../domain/reconciliation';
 import type {
+  ColomboReceipts,
   ColomboUploader,
   CredentialsStore,
   DurableMediaStore,
@@ -12,8 +19,15 @@ export interface UploadQueueSnapshot {
   activeError: string | null;
   interruptedCount: number;
   isProcessing: boolean;
+  isReconciling: boolean;
   items: UploadQueueItem[];
 }
+
+/**
+ * Why a reconciliation pass ran. Delivery is only ever learned from a receipt,
+ * so these are the moments worth asking — never a timer that assumes an answer.
+ */
+export type ReconcileTrigger = 'start' | 'foreground' | 'connectivity' | 'user';
 
 type Listener = (snapshot: UploadQueueSnapshot) => void;
 
@@ -34,6 +48,8 @@ export class UploadQueueController {
   private activeError: string | null = null;
   private interruptedCount = 0;
   private isProcessing = false;
+  private isReconciling = false;
+  private reconciling: Promise<void> | null = null;
   private items: UploadQueueItem[] = [];
   private readonly listeners = new Set<Listener>();
   private processRequested = false;
@@ -43,6 +59,7 @@ export class UploadQueueController {
     private readonly mediaStore: DurableMediaStore,
     private readonly credentialsStore: CredentialsStore,
     private readonly uploader: ColomboUploader,
+    private readonly receipts: ColomboReceipts,
     private readonly idFactory: () => string = createQueueId,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -52,6 +69,7 @@ export class UploadQueueController {
       activeError: this.activeError,
       interruptedCount: this.interruptedCount,
       isProcessing: this.isProcessing,
+      isReconciling: this.isReconciling,
       items: [...this.items],
     };
   }
@@ -69,6 +87,7 @@ export class UploadQueueController {
     await this.mediaStore.reconcile(persisted.map((item) => item.fileUri));
     await this.refresh();
     void this.processPending();
+    void this.reconcile('start');
   }
 
   async enqueue(source: MediaSource, selected: SelectedMedia[]): Promise<void> {
@@ -96,7 +115,17 @@ export class UploadQueueController {
     void this.processPending();
   }
 
+  /**
+   * Re-uploads one row. Refused while Colombo may still be working on it: a
+   * transient status failure must not become a duplicate delivery.
+   */
   async retry(id: string): Promise<void> {
+    const item = this.items.find((candidate) => candidate.id === id);
+    if (item && !canRetryUpload(item)) {
+      this.activeError = 'This upload is still with Colombo. Refresh its status before uploading again.';
+      this.emit();
+      return;
+    }
     await this.store.retry(id);
     this.activeError = null;
     await this.refresh();
@@ -110,11 +139,67 @@ export class UploadQueueController {
     await this.processPending();
   }
 
-  async clearAccepted(): Promise<void> {
-    const accepted = (await this.store.list()).filter((item) => item.status === 'accepted');
-    await Promise.all(accepted.map((item) => this.mediaStore.remove(item.fileUri)));
-    await this.store.clearAccepted();
+  /**
+   * Removes the rows Colombo has finished with, at the user's request. A row
+   * whose delivery is unknown or still in flight is kept, so nothing is deleted
+   * on the strength of silence.
+   */
+  async clearSettled(): Promise<void> {
+    const settled = (await this.store.list()).filter(isDeletable);
+    if (settled.length === 0) {
+      await this.refresh();
+      return;
+    }
+    await Promise.all(settled.map((item) => this.mediaStore.remove(item.fileUri)));
+    await this.store.remove(settled.map((item) => item.id));
     await this.refresh();
+  }
+
+  /**
+   * Polls Colombo for the delivery receipts of rows it still owns.
+   *
+   * Runs on launch, foreground, connectivity restoration, and user refresh. A
+   * user refresh ignores backoff; every other trigger respects it.
+   */
+  async reconcile(trigger: ReconcileTrigger = 'user'): Promise<void> {
+    // A caller arriving mid-pass awaits that pass rather than silently getting
+    // nothing: a user tapping refresh should see the result either way.
+    if (this.reconciling) return this.reconciling;
+    this.reconciling = this.runReconcile(trigger);
+    try {
+      await this.reconciling;
+    } finally {
+      this.reconciling = null;
+    }
+  }
+
+  private async runReconcile(trigger: ReconcileTrigger): Promise<void> {
+    this.isReconciling = true;
+    this.emit();
+
+    try {
+      const credentials = await this.credentialsStore.load();
+      if (!credentials) return;
+
+      const now = this.now();
+      const persisted = await this.store.list();
+      const due = trigger === 'user'
+        ? persisted.filter((item) => item.operationId && !isDeletable(item))
+        : reconcilableItems(persisted, now);
+
+      for (const item of due) {
+        if (!item.operationId) continue;
+        const outcome = await this.receipts.fetchReceipt(item.operationId, credentials);
+        await this.store.recordServerState(item.id, applyReceiptOutcome(item, outcome, this.now()));
+      }
+      await this.refresh();
+    } catch {
+      // A reconciliation failure leaves every row exactly as it was: unknown
+      // delivery is retried, never resolved into failure or success.
+    } finally {
+      this.isReconciling = false;
+      this.emit();
+    }
   }
 
   async processPending(): Promise<void> {
@@ -147,7 +232,7 @@ export class UploadQueueController {
           const accepted = await this.uploader.upload(item, credentials, (progress) => {
             void this.persistProgress(item.id, progress).catch(() => undefined);
           });
-          await this.store.markAccepted(item.id, accepted.assignmentId);
+          await this.store.markAccepted(item.id, accepted.assignmentId, accepted.operationId);
         } catch (error) {
           await this.store.markFailed(item.id, safeUploadError(error));
         }

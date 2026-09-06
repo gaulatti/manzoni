@@ -61,15 +61,21 @@ export function parseAcceptedUpload(statusCode: number, body: string): AcceptedU
 
   const receipt = parsed as Record<string, unknown>;
   const assignmentId = receipt.assignment_id;
+  // The operation id is the key to the delivery receipt. Without it this device
+  // could never learn whether the file was delivered, so an acceptance that
+  // omits it is not usable.
+  const operationId = receipt.operation_id;
   if (
     receipt.status !== 'accepted' ||
     (typeof assignmentId !== 'string' && typeof assignmentId !== 'number') ||
-    String(assignmentId).trim() === ''
+    String(assignmentId).trim() === '' ||
+    typeof operationId !== 'string' ||
+    operationId.trim() === ''
   ) {
     throw new Error('Colombo returned an invalid accepted-upload receipt.');
   }
 
-  return { assignmentId: String(assignmentId), status: 'accepted' };
+  return { assignmentId: String(assignmentId), operationId, status: 'accepted' };
 }
 
 export class ExpoColomboUploader implements ColomboUploader {

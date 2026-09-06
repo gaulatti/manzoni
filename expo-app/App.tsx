@@ -19,6 +19,7 @@ import { CameraScreen } from './src/components/CameraScreen';
 import { LibraryScreen } from './src/components/LibraryScreen';
 import { QueueScreen } from './src/components/QueueScreen';
 import { SettingsScreen } from './src/components/SettingsScreen';
+import { useDeliveryReconciliation } from './src/hooks/useDeliveryReconciliation';
 import { createManzoniRuntime, type ManzoniRuntime } from './src/services/runtime';
 
 type TabId = 'camera' | 'library' | 'queue' | 'settings';
@@ -32,6 +33,7 @@ const TABS: AppShellTab[] = [
 
 function ManzoniApp({ runtime }: { runtime: ManzoniRuntime }) {
   const [activeTab, setActiveTab] = useState<TabId>('camera');
+  useDeliveryReconciliation(runtime.controller);
   const screen = useMemo(() => {
     switch (activeTab) {
       case 'camera':
