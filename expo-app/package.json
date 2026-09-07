@@ -11,6 +11,7 @@
     "@gaulatti/bleecker": "0.1.41",
     "@gaulatti/thompson": "github:gaulatti/thompson#b0fba61b1860a27f1a580bd1b1e7c67bdfcef38b",
     "@react-native-community/datetimepicker": "9.1.0",
+    "@react-native-community/netinfo": "12.0.1",
     "@react-native-community/slider": "5.2.0",
     "expo": "~57.0.20",
     "expo-camera": "~57.0.4",
@@ -42,8 +43,12 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
+    "test:candidate-config": "node --test scripts/verify-internal-candidate.test.mjs",
+    "candidate:verify": "node scripts/verify-internal-candidate.mjs",
+    "build:internal:android": "npm run candidate:verify && npx eas-cli@23.2.0 build --platform android --profile internal",
+    "build:internal:ios": "npm run candidate:verify && npx eas-cli@23.2.0 build --platform ios --profile internal",
     "export": "expo export --platform all --output-dir dist",
-    "check": "npm run typecheck && npm test && npm run export"
+    "check": "npm run typecheck && npm test && npm run test:candidate-config && npm run export"
   },
   "jest": {
     "preset": "jest-expo",

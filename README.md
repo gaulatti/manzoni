@@ -9,7 +9,7 @@ Flutter has not been deleted or silently redirected. The clients have separate l
 
 ## Expo client
 
-The Expo client uses Thompson for its shell, forms, status, progress, error, and queue presentation. Thompson is installed from the exact audited commit recorded in `expo-app/package.json` and `package-lock.json`; it never resolves through a sibling checkout.
+The Expo client uses Thompson for its shell, forms, status, progress, error, and queue presentation. Thompson is currently installed from the exact audited commit recorded in `expo-app/package.json` and `package-lock.json`; it never resolves through a sibling checkout. Internal distribution is fail-closed until Thompson's separately tracked registry publication is available and the dependency and lockfile use that exact immutable version.
 
 Camera captures and library selections both follow the same path:
 
@@ -93,10 +93,11 @@ Two rules are enforced in `src/domain/reconciliation.ts` rather than in the UI:
   refused while Colombo may still be working, so a transient outage can never
   become a duplicate delivery.
 
-Reconciliation runs on launch, on every return to the foreground, on a slow
-foreground poll, and on the queue's **Check delivery** button. A user refresh
-ignores per-row backoff; every other trigger respects it. Rows are removed only
-when the user asks *and* Colombo has reached a terminal state.
+Reconciliation runs on launch, on every return to the foreground, on an actual
+offline-to-online transition, on a slow foreground poll, and on the queue's
+**Check delivery** button. A user refresh ignores per-row backoff; every other
+trigger respects it. Rows are removed only when the user asks *and* Colombo has
+reached a terminal state.
 
 An install created before this release is migrated with `ALTER TABLE ADD COLUMN`
 (guarded by `PRAGMA user_version`), so existing rows and their app-owned media
@@ -111,6 +112,20 @@ npm run check
 ```
 
 `npm run check` runs TypeScript, Jest contract tests, and Metro exports for iOS, Android, and web. Expo SQLite web exports require the committed Wasm Metro configuration. A deployed web target would additionally need `Cross-Origin-Embedder-Policy` and `Cross-Origin-Opener-Policy` headers; no web deployment is included here.
+
+### Internal distribution
+
+`expo-app/eas.json` defines a clean-commit-only `internal` profile. It produces
+an installable Android APK or an ad hoc provisioned iOS build without a
+development server. Run `npm run candidate:verify` before either signed build;
+the guard rejects Git, file, range, and tag-based Thompson dependencies and
+requires an exact `registry.npmjs.org` lockfile resolution with integrity.
+
+The guard intentionally fails today because `@gaulatti/thompson` has not been
+published to npm. Do not bypass it or build a distribution candidate from the
+current Git pin. See the [internal distribution runbook](expo-app/docs/internal-distribution.md)
+for the external prerequisites, clean-install migration boundary, device test,
+Colombo receipt proof, and rollback record.
 
 ## Flutter rollback client
 
