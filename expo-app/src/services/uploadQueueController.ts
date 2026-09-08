@@ -27,7 +27,7 @@ export interface UploadQueueSnapshot {
  * Why a reconciliation pass ran. Delivery is only ever learned from a receipt,
  * so these are the moments worth asking — never a timer that assumes an answer.
  */
-export type ReconcileTrigger = 'start' | 'foreground' | 'connectivity' | 'user';
+export type ReconcileTrigger = 'start' | 'foreground' | 'connectivity' | 'poll' | 'user';
 
 type Listener = (snapshot: UploadQueueSnapshot) => void;
 
