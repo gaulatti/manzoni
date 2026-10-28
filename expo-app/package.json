@@ -43,6 +43,7 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
+    "test:coverage": "jest --runInBand --coverage --coverageProvider=v8 --coverageReporters=json --collectCoverageFrom='src/**/*.{ts,tsx}' --collectCoverageFrom='!src/**/__tests__/**' --collectCoverageFrom='!src/**/*.test.*' --collectCoverageFrom='!**/*.d.ts'",
     "test:candidate-config": "node --test scripts/verify-internal-candidate.test.mjs",
     "candidate:verify": "node scripts/verify-internal-candidate.mjs",
     "build:internal:android": "npm run candidate:verify && npx eas-cli@23.2.0 build --platform android --profile internal",
