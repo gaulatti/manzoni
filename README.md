@@ -137,3 +137,37 @@ flutter run
 ```
 
 The Flutter smoke test tracks the current `ManzoniApp` no-camera state. Flutter's legacy upload flow remains a rollback/reference path and is not the durable-queue implementation described above.
+
+## Pull request verification
+
+Local agent review uses the shared `clouseau` skill with the developer's
+authenticated coding harness and the `.clouseau-local.json` recipe; it needs no
+CI provider keys. `AGENTS.md` owns the rule: run it against the final committed
+change before opening a PR, repair findings, and publish the passing signed
+receipt in the initial ready PR body. Never push directly to `main`.
+
+Every PR runs:
+
+- the Expo client type check, the Jest suite under V8 coverage (`npm run test:coverage --prefix expo-app`) and the internal candidate configuration test,
+- `npm run export --prefix expo-app` for every platform,
+- the workflow-contract tests in `.github/tests`.
+
+The Clouseau gate requires exactly 100% line and branch coverage over the
+Expo client's `expo-app/src`; new behaviour needs a test, never a coverage
+pragma. The Flutter reference client at the repository root has no supported
+native coverage format in the shared engine, so it is not measured, and the
+policy therefore selects `manual` merge mode: reviews run on every PR, and the
+owner merges.
+
+A PR carrying an authenticated local review stamp is verified by the pinned
+Clouseau engine without AI credentials; unstamped PRs use the CI reviewer.
+Reviews run on every PR and the policy selects manual merge mode, so the owner merges. Unresolved
+product-direction questions go to the owner, and changes to review controls need
+the owner's `/approve-intent <head SHA>` comment. See [the purpose
+contract](.github/clouseau.md). The CI engine is resolved from protected
+Clouseau `main` at the start of each run (see
+[automatic Clouseau CI upgrades](https://github.com/gaulatti/clouseau/blob/main/docs/automatic-ci-upgrades.md)).
+
+CI needs these repository secrets: `DEEPSEEK_API_KEY` and `TYPESAFE_API_KEY` for
+the CI reviewer, and `DEPLOYMENT_TOKEN` (a token with contents write access
+from an identity other than `github-actions[bot]`) for automatic repairs.

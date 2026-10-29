@@ -46,3 +46,6 @@ app.*.map.json
 
 # test coverage output
 coverage/
+.clouseau-ci
+.clouseau-review
+.github/tests/node_modules
